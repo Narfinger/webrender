@@ -530,8 +530,11 @@ impl TextureResolver {
         // invalidate it so that tiled GPUs don't need to resolve it
         // back to memory.
         for texture_id in textures_to_invalidate {
-            let render_target = &self.texture_cache_map[texture_id].texture;
-            device.invalidate_render_target(render_target);
+            if let Some(render_target) =
+                &self.texture_cache_map.get(texture_id).map(|cm| &cm.texture)
+            {
+                device.invalidate_render_target(render_target);
+            }
         }
     }
 
@@ -554,8 +557,9 @@ impl TextureResolver {
                 Swizzle::default()
             }
             TextureSource::TextureCache(index, swizzle) => {
-                let texture = &self.texture_cache_map[&index].texture;
-                device.bind_texture(sampler, texture, swizzle);
+                if let Some(texture) = self.texture_cache_map.get(&index).map(|cm| &cm.texture) {
+                    device.bind_texture(sampler, texture, swizzle);
+                }
                 swizzle
             }
         }
@@ -574,7 +578,11 @@ impl TextureResolver {
                 panic!("BUG: External textures cannot be resolved, they can only be bound.");
             }
             TextureSource::TextureCache(index, swizzle) => {
-                Some((&self.texture_cache_map[&index].texture, swizzle))
+                if let Some(texture) = self.texture_cache_map.get(&index).map(|cm| &cm.texture) {
+                    Some((&texture, swizzle))
+                } else {
+                    None
+                }
             }
         }
     }
@@ -603,9 +611,11 @@ impl TextureResolver {
     fn get_texture_size(&self, texture: &TextureSource) -> DeviceIntSize {
         match *texture {
             TextureSource::Invalid => DeviceIntSize::zero(),
-            TextureSource::TextureCache(id, _) => {
-                self.texture_cache_map[&id].texture.get_dimensions()
-            },
+            TextureSource::TextureCache(id, _) => self
+                .texture_cache_map
+                .get(&id)
+                .map(|cm| cm.texture.get_dimensions())
+                .unwrap_or(DeviceIntSize::zero()),
             TextureSource::External(TextureSourceExternal { index, .. }) => {
                 // If UV coords are normalized then this value will be incorrect. However, the
                 // texture size is currently only used to set the uTextureSize uniform, so that
@@ -654,7 +664,8 @@ impl TextureResolver {
     }
 
     fn get_cache_texture_mut(&mut self, id: &CacheTextureId) -> &mut Texture {
-        &mut self.texture_cache_map
+        &mut self
+            .texture_cache_map
             .get_mut(id)
             .expect("bug: texture not allocated")
             .texture
@@ -1853,41 +1864,55 @@ impl Renderer {
         for update_list in pending_texture_updates.drain(..) {
             // Handle copies from one texture to another.
             for ((src_tex, dst_tex), copies) in &update_list.copies {
+                    if let Some(dest_texture) = &self
+                        .texture_resolver
+                        .texture_cache_map
+                        .get(&dst_tex)
+                        .map(|cm| &cm.texture)
+                    {
+                        let dst_texture_size = dest_texture.get_dimensions().to_f32();
 
-                let dest_texture = &self.texture_resolver.texture_cache_map[&dst_tex].texture;
-                let dst_texture_size = dest_texture.get_dimensions().to_f32();
+                        let mut copy_instances = Vec::new();
+                        for copy in copies {
+                            copy_instances.push(CopyInstance {
+                                src_rect: copy.src_rect.to_f32(),
+                                dst_rect: copy.dst_rect.to_f32(),
+                                dst_texture_size,
+                            });
+                        }
 
-                let mut copy_instances = Vec::new();
-                for copy in copies {
-                    copy_instances.push(CopyInstance {
-                        src_rect: copy.src_rect.to_f32(),
-                        dst_rect: copy.dst_rect.to_f32(),
-                        dst_texture_size,
-                    });
-                }
+                    let mut copy_instances = Vec::new();
+                    for copy in copies {
+                        copy_instances.push(CopyInstance {
+                            src_rect: copy.src_rect.to_f32(),
+                            dst_rect: copy.dst_rect.to_f32(),
+                            dst_texture_size,
+                        });
+                    }
 
-                let draw_target = DrawTarget::from_texture(dest_texture, false);
-                self.device.bind_draw_target(draw_target);
+                    let draw_target = DrawTarget::from_texture(dest_texture, false);
+                    self.device.bind_draw_target(draw_target);
 
-                self.shaders
-                    .borrow_mut()
-                    .ps_copy()
-                    .bind(
-                        &mut self.device,
-                        &Transform3D::identity(),
-                        None,
-                        &mut self.renderer_errors,
-                        &mut self.profile,
+                    self.shaders
+                        .borrow_mut()
+                        .ps_copy()
+                        .bind(
+                            &mut self.device,
+                            &Transform3D::identity(),
+                            None,
+                            &mut self.renderer_errors,
+                            &mut self.profile,
+                        );
+
+                    self.draw_instanced_batch(
+                        &copy_instances,
+                        VertexArrayKind::Copy,
+                        &BatchTextures::composite_rgb(
+                            TextureSource::TextureCache(*src_tex, Swizzle::default())
+                        ),
+                        &mut RendererStats::default(),
                     );
-
-                self.draw_instanced_batch(
-                    &copy_instances,
-                    VertexArrayKind::Copy,
-                    &BatchTextures::composite_rgb(
-                        TextureSource::TextureCache(*src_tex, Swizzle::default())
-                    ),
-                    &mut RendererStats::default(),
-                );
+                }
             }
 
             // Find any textures that will need to be deleted in this group of allocations.
