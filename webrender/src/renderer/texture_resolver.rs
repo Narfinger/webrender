@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use api::{
     units::{DeviceIntSize, TexelRect},
     ImageBufferKind, ImageFormat,
@@ -17,9 +15,9 @@ use crate::{
 
 use super::TextureSampler;
 
-struct CacheTexture {
-    texture: Texture,
-    category: TextureCacheCategory,
+pub(crate) struct CacheTexture {
+    pub(crate) texture: Texture,
+    pub(crate) category: TextureCacheCategory,
 }
 
 /// Helper struct for resolving device Textures for use during rendering passes.
@@ -223,11 +221,46 @@ impl TextureResolver {
             .texture
     }
 
-    pub(crate) fn get_cache_texture(&self, id: &CacheTextureId) -> &Texture {
-        &self
-            .texture_cache_map
-            .get(id)
-            .expect("bug: texture not allocated")
-            .texture
+    pub(crate) fn get_texture_from_cache(&self, id: &CacheTextureId) -> Option<&Texture> {
+        self.texture_cache_map.get(id).map(|ct| &ct.texture)
+    }
+
+    pub(crate) fn remove_texture_from_cache(
+        &mut self,
+        id: &CacheTextureId,
+    ) -> Option<CacheTexture> {
+        self.texture_cache_map.remove(&id)
+    }
+
+    pub(crate) fn insert_texture_into_cache(&mut self, id: CacheTextureId, texture: CacheTexture) {
+        self.texture_cache_map.insert(id, texture);
+    }
+
+    pub(crate) fn texture_cache(&self) -> &FastHashMap<CacheTextureId, CacheTexture> {
+        &self.texture_cache_map
+    }
+
+    pub(crate) fn texture_cache_drain(
+        &mut self,
+    ) -> impl Iterator<Item = (CacheTextureId, CacheTexture)> + use<'_> {
+        self.texture_cache_map.drain()
+    }
+
+    pub(crate) fn insert_external_image(
+        &mut self,
+        id: DeferredResolveIndex,
+        texture: ExternalTexture,
+    ) {
+        self.external_images.insert(id, texture);
+    }
+
+    pub(crate) fn external_image_drain(
+        &mut self,
+    ) -> impl Iterator<Item = (DeferredResolveIndex, ExternalTexture)> + use<'_> {
+        self.external_images.drain()
+    }
+
+    pub(crate) fn external_images(&self) -> &FastHashMap<DeferredResolveIndex, ExternalTexture> {
+        &self.external_images
     }
 }

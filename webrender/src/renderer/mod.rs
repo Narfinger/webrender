@@ -48,7 +48,7 @@ use api::units::*;
 use api::channel::{Sender, Receiver};
 pub use api::DebugFlags;
 use core::time::Duration;
-use texture_resolver::TextureResolver;
+use texture_resolver::{CacheTexture, TextureResolver};
 
 use crate::pattern::PatternKind;
 use crate::render_api::{DebugCommand, ApiMsg, MemoryReport};
@@ -1681,11 +1681,7 @@ impl Renderer {
         for update_list in pending_texture_updates.drain(..) {
             // Handle copies from one texture to another.
             for ((src_tex, dst_tex), copies) in &update_list.copies {
-                if let Some(dest_texture) = &self
-                    .texture_resolver
-                    .texture_cache_map
-                    .get(&dst_tex)
-                    .map(|cm| &cm.texture)
+                if let Some(dest_texture) = &self.texture_resolver.get_texture_from_cache(&dst_tex)
                 {
                     let dst_texture_size = dest_texture.get_dimensions().to_f32();
 
@@ -1735,8 +1731,7 @@ impl Renderer {
             for allocation in &update_list.allocations {
                 let old = self
                     .texture_resolver
-                    .texture_cache_map
-                    .remove(&allocation.id);
+                    .remove_texture_from_cache(&allocation.id);
                 match allocation.kind {
                     TextureCacheAllocationKind::Alloc(_) => {
                         assert!(old.is_none(), "Renderer and backend disagree!");
@@ -1851,7 +1846,7 @@ impl Renderer {
 
                         create_cache_texture_time += precise_time_ns() - create_cache_texture_start;
 
-                        self.texture_resolver.texture_cache_map.insert(
+                        self.texture_resolver.insert_texture_into_cache(
                             allocation.id,
                             CacheTexture {
                                 texture,
@@ -4429,8 +4424,7 @@ impl Renderer {
             };
 
             self.texture_resolver
-                .external_images
-                .insert(DeferredResolveIndex(i as u32), texture);
+                .insert_external_image(DeferredResolveIndex(i as u32), texture);
 
             list.updates.push(GpuCacheUpdate::Copy {
                 block_index: list.blocks.len(),
@@ -4445,13 +4439,13 @@ impl Renderer {
     }
 
     fn unlock_external_images(&mut self, deferred_resolves: &[DeferredResolve]) {
-        if !self.texture_resolver.external_images.is_empty() {
+        if !self.texture_resolver.external_images().is_empty() {
             let handler = self
                 .external_image_handler
                 .as_mut()
                 .expect("Found external image, but no handler set!");
 
-            for (index, _) in self.texture_resolver.external_images.drain() {
+            for (index, _) in self.texture_resolver.external_image_drain() {
                 let props = &deferred_resolves[index.0 as usize].image_properties;
                 let ext_image = props
                     .external_image
@@ -5105,7 +5099,7 @@ impl Renderer {
 
         let textures = self
             .texture_resolver
-            .texture_cache_map
+            .texture_cache()
             .values()
             .filter(|item| item.category == TextureCacheCategory::RenderTarget)
             .map(|item| &item.texture)
@@ -5203,7 +5197,7 @@ impl Renderer {
 
         let textures = self
             .texture_resolver
-            .texture_cache_map
+            .texture_cache()
             .values()
             .filter(|item| item.category == TextureCacheCategory::Atlas)
             .map(|item| &item.texture)
@@ -5948,7 +5942,7 @@ impl Renderer {
             };
 
             info!("saving cached textures");
-            for (id, item) in &self.texture_resolver.texture_cache_map {
+            for (id, item) in self.texture_resolver.texture_cache().iter() {
                 let file_name = format!("cache-{}", plain_self.textures.len() + 1);
                 info!("\t{}", file_name);
                 let plain = Self::save_texture(
@@ -5990,7 +5984,7 @@ impl Renderer {
         use std::{fs::File, io::Read};
 
         info!("loading external buffer-backed images");
-        assert!(self.texture_resolver.external_images.is_empty());
+        assert!(self.texture_resolver.external_images().is_empty());
         let mut raw_map = FastHashMap::<String, Arc<Vec<u8>>>::default();
         let mut image_handler = DummyExternalImageHandler {
             data: FastHashMap::default(),
@@ -6072,7 +6066,7 @@ impl Renderer {
             info!("loading cached textures");
             self.device_size = renderer.device_size;
 
-            for (_id, item) in self.texture_resolver.texture_cache_map.drain() {
+            for (_id, item) in self.texture_resolver.texture_cache_drain() {
                 self.device.delete_texture(item.texture);
             }
             for (id, texture) in renderer.textures {
@@ -6087,7 +6081,7 @@ impl Renderer {
                     &root,
                     &mut self.device,
                 );
-                self.texture_resolver.texture_cache_map.insert(
+                self.texture_resolver.insert_texture_into_cache(
                     id,
                     CacheTexture {
                         texture: t.0,
@@ -6109,7 +6103,7 @@ impl Renderer {
         } else {
             info!("loading cached textures");
             self.device.begin_frame();
-            for (_id, item) in self.texture_resolver.texture_cache_map.drain() {
+            for (_id, item) in self.texture_resolver.texture_cache_drain() {
                 self.device.delete_texture(item.texture);
             }
         }

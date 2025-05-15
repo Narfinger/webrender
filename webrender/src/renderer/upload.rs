@@ -82,7 +82,10 @@ pub fn upload_to_texture_cache(
     let num_updates = update_list.len();
 
     for (texture_id, updates) in update_list {
-        let texture = &renderer.texture_resolver.get_cache_texture(&texture_id);
+        let texture = &renderer
+            .texture_resolver
+            .get_texture_from_cache(&texture_id)
+            .expect("Could not find texture in cache");
         for update in updates {
             let TextureCacheUpdate {
                 rect,
@@ -525,19 +528,21 @@ fn copy_from_staging_to_cache(
     batch_upload_copies: Vec<BatchUploadCopy>,
 ) {
     for copy in batch_upload_copies {
-        let dest_texture =
-            &renderer.texture_resolver.texture_cache_map[&copy.dest_texture_id].texture;
-
-        renderer.device.copy_texture_sub_region(
-            &batch_upload_textures[copy.src_texture_index],
-            copy.src_offset.x as _,
-            copy.src_offset.y as _,
-            dest_texture,
-            copy.dest_offset.x as _,
-            copy.dest_offset.y as _,
-            copy.size.width as _,
-            copy.size.height as _,
-        );
+        if let Some(dest_texture) = &renderer
+            .texture_resolver
+            .get_texture_from_cache(&copy.dest_texture_id)
+        {
+            renderer.device.copy_texture_sub_region(
+                &batch_upload_textures[copy.src_texture_index],
+                copy.src_offset.x as _,
+                copy.src_offset.y as _,
+                dest_texture,
+                copy.dest_offset.x as _,
+                copy.dest_offset.y as _,
+                copy.size.width as _,
+                copy.size.height as _,
+            );
+        }
     }
 }
 
@@ -576,22 +581,25 @@ fn copy_from_staging_to_cache_using_draw_calls(
         }
 
         if dst_changed {
-            let dest_texture =
-                &renderer.texture_resolver.texture_cache_map[&copy.dest_texture_id].texture;
-            dst_texture_size = dest_texture.get_dimensions().to_f32();
+            if let Some(dest_texture) = &renderer
+                .texture_resolver
+                .get_texture_from_cache(&copy.dest_texture_id)
+            {
+                dst_texture_size = dest_texture.get_dimensions().to_f32();
 
-            let draw_target = DrawTarget::from_texture(dest_texture, false);
-            renderer.device.bind_draw_target(draw_target);
+                let draw_target = DrawTarget::from_texture(dest_texture, false);
+                renderer.device.bind_draw_target(draw_target);
 
-            renderer.shaders.borrow_mut().ps_copy().bind(
-                &mut renderer.device,
-                &Transform3D::identity(),
-                None,
-                &mut renderer.renderer_errors,
-                &mut renderer.profile,
-            );
+                renderer.shaders.borrow_mut().ps_copy().bind(
+                    &mut renderer.device,
+                    &Transform3D::identity(),
+                    None,
+                    &mut renderer.renderer_errors,
+                    &mut renderer.profile,
+                );
 
-            prev_dst = Some(copy.dest_texture_id);
+                prev_dst = Some(copy.dest_texture_id);
+            }
         }
 
         if src_changed {
