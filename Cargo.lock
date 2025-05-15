@@ -1561,6 +1561,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "mach2"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19b955cdeb2a02b9117f121ce63aa52d08ade45de53e48fe6a38b39c10f6f709"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3170,7 +3179,6 @@ dependencies = [
  "smallvec",
  "svg_fmt",
  "swgl",
- "time",
  "topological-sort",
  "tracy-rs",
  "webrender_api",
@@ -3203,12 +3211,14 @@ dependencies = [
  "byteorder",
  "crossbeam-channel",
  "euclid",
+ "libc",
+ "mach2",
  "malloc_size_of_derive",
  "peek-poke",
  "serde",
  "serde_bytes",
  "serde_derive",
- "time",
+ "windows-sys 0.59.0",
  "wr_malloc_size_of",
 ]
 
@@ -3298,6 +3308,15 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
+dependencies = [
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
